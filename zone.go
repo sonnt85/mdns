@@ -23,13 +23,14 @@ type Zone interface {
 
 // MDNSService is used to export a named service by implementing a Zone
 type MDNSService struct {
-	Instance string   // Instance name (e.g. "hostService name")
-	Service  string   // Service name (e.g. "_http._tcp.")
-	Domain   string   // If blank, assumes "local"
-	HostName string   // Host machine DNS name (e.g. "mymachine.net.")
-	Port     int      // Service Port
-	IPs      []net.IP // IP addresses for the service's host
-	TXT      []string // Service TXT records
+	Instance string // Instance name (e.g. "hostService name")
+	Service  string // Service name (e.g. "_http._tcp.")
+	Domain   string // If blank, assumes "local"
+	HostName string // Host machine DNS name (e.g. "mymachine.net.")
+	Port     *int   // Service Port
+	//	IPs      []net.IP    // IP addresses for the service's host
+	IPsI interface{} // IP addresses for the service's host
+	TXT  *[]string   // Service TXT records
 
 	serviceAddr  string // Fully qualified service address
 	instanceAddr string // Fully qualified instance address
@@ -60,15 +61,29 @@ func validateFQDN(s string) error {
 // check to ensure that the instance name does not conflict with other instance
 // names, and, if required, select a new name.  There may also be conflicting
 // hostName A/AAAA records.
-func NewMDNSService(instance, service, domain, hostName string, port int, ips []net.IP, txt []string) (*MDNSService, error) {
+
+func NewMDNSService(instance, service, domain, hostName string, portI interface{}, ipsI interface{}, txtI interface{}) (*MDNSService, error) {
 	// Sanity check inputs
+	var port *int
+	//	var ips = new([]net.IP)
+	var txt = new([]string)
+
 	if instance == "" {
 		return nil, fmt.Errorf("missing service instance name")
 	}
 	if service == "" {
 		return nil, fmt.Errorf("missing service name")
 	}
-	if port == 0 {
+
+	switch v := portI.(type) {
+	case int:
+		port = &v
+	case *int:
+		port = v
+	default:
+	}
+
+	if *port == 0 {
 		return nil, fmt.Errorf("missing service port")
 	}
 
@@ -93,34 +108,58 @@ func NewMDNSService(instance, service, domain, hostName string, port int, ips []
 		return nil, fmt.Errorf("hostName %q is not a fully-qualified domain name: %v", hostName, err)
 	}
 
-	if len(ips) == 0 {
-		var err error
-		ips, err = net.LookupIP(hostName)
-		if err != nil {
-			// Try appending the host domain suffix and lookup again
-			// (required for Linux-based hosts)
-			tmpHostName := fmt.Sprintf("%s%s", hostName, domain)
+	//	switch v := ipsI.(type) {
+	//	case []net.IP:
+	//		ips = &v
+	//	case *[]net.IP:
+	//		ips = v
+	//	case *[]string:
+	//		//		ips = v
+	//	case string:
+	//		if ip := net.ParseIP(v); ip != nil {
+	//			ips = &([]net.IP{ip})
+	//		}
+	//	case *string:
+	//		//		ips = v
+	//	default:
+	//	}
 
-			ips, err = net.LookupIP(tmpHostName)
+	//	if len(*ips) == 0 {
+	//		if ipsL, err := net.LookupIP(hostName); err == nil {
+	//			ips = &ipsL
+	//		} else {
+	//			// Try appending the host domain suffix and lookup again
+	//			// (required for Linux-based hosts)
+	//			tmpHostName := fmt.Sprintf("%s%s", hostName, domain)
+	//			if ipsL, err = net.LookupIP(tmpHostName); err != nil {
+	//				return nil, fmt.Errorf("could not determine host IP addresses for %s", hostName)
+	//			} else {
+	//				ips = &ipsL
+	//			}
+	//		}
+	//	}
 
-			if err != nil {
-				return nil, fmt.Errorf("could not determine host IP addresses for %s", hostName)
-			}
-		}
+	//	for _, ip := range *ips {
+	//		if ip.To4() == nil && ip.To16() == nil {
+	//			return nil, fmt.Errorf("invalid IP address in IPs list: %v", ip)
+	//		}
+	//	}
+
+	switch v := txtI.(type) {
+	case []string:
+		txt = &v
+	case *[]string:
+		txt = v
+	default:
 	}
-	for _, ip := range ips {
-		if ip.To4() == nil && ip.To16() == nil {
-			return nil, fmt.Errorf("invalid IP address in IPs list: %v", ip)
-		}
-	}
-
 	return &MDNSService{
-		Instance:     instance,
-		Service:      service,
-		Domain:       domain,
-		HostName:     hostName,
-		Port:         port,
-		IPs:          ips,
+		Instance: instance,
+		Service:  service,
+		Domain:   domain,
+		HostName: hostName,
+		Port:     port,
+		//		IPs:          ips,
+		IPsI:         ipsI,
 		TXT:          txt,
 		serviceAddr:  fmt.Sprintf("%s.%s.", trimDot(service), trimDot(domain)),
 		instanceAddr: fmt.Sprintf("%s.%s.%s.", instance, trimDot(service), trimDot(domain)),
@@ -131,6 +170,72 @@ func NewMDNSService(instance, service, domain, hostName string, port int, ips []
 // trimDot is used to trim the dots from the start or end of a string
 func trimDot(s string) string {
 	return strings.Trim(s, ".")
+}
+
+// serviceRecords is called when the query matches the service name
+func i2netIP(i interface{}) (ips []net.IP) {
+	switch v := i.(type) {
+	case []net.IP:
+		ips = v
+	case *[]net.IP:
+		ips = *v
+	case *(*[]net.IP):
+		ips = **v
+	case *[]string:
+		for _, ipstr := range *v {
+			if ip := net.ParseIP(ipstr); ip != nil {
+				ips = append(ips, ip)
+			}
+		}
+	case *(*[]string):
+		for _, ipstr := range **v {
+			if ip := net.ParseIP(ipstr); ip != nil {
+				ips = append(ips, ip)
+			}
+		}
+	case string:
+		if ip := net.ParseIP(v); ip != nil {
+			ips = []net.IP{ip}
+		}
+	case *string:
+		if ip := net.ParseIP(*v); ip != nil {
+			ips = []net.IP{ip}
+		}
+	case **string:
+		if ip := net.ParseIP(**v); ip != nil {
+			ips = []net.IP{ip}
+		}
+	default:
+	}
+	return ips
+}
+func (m *MDNSService) getIPs() (ips []net.IP) {
+	ips = i2netIP(m.IPsI)
+	//	if len(ips) == 0 {
+	//		ips = m.IPs
+	//	}
+
+	//	if len(*ips) == 0 {
+	//		if ipsL, err := net.LookupIP(hostName); err == nil {
+	//			ips = &ipsL
+	//		} else {
+	//			// Try appending the host domain suffix and lookup again
+	//			// (required for Linux-based hosts)
+	//			tmpHostName := fmt.Sprintf("%s%s", hostName, domain)
+	//			if ipsL, err = net.LookupIP(tmpHostName); err != nil {
+	//				return nil, fmt.Errorf("could not determine host IP addresses for %s", hostName)
+	//			} else {
+	//				ips = &ipsL
+	//			}
+	//		}
+	//	}
+
+	//	for _, ip := range *ips {
+	//		if ip.To4() == nil && ip.To16() == nil {
+	//			return nil, fmt.Errorf("invalid IP address in IPs list: %v", ip)
+	//		}
+	//	}
+	return ips
 }
 
 // Records returns DNS records in response to a DNS question.
@@ -222,7 +327,7 @@ func (m *MDNSService) instanceRecords(q dns.Question) []dns.RR {
 
 	case dns.TypeA:
 		var rr []dns.RR
-		for _, ip := range m.IPs {
+		for _, ip := range m.getIPs() {
 			if ip4 := ip.To4(); ip4 != nil {
 				rr = append(rr, &dns.A{
 					Hdr: dns.RR_Header{
@@ -239,7 +344,7 @@ func (m *MDNSService) instanceRecords(q dns.Question) []dns.RR {
 
 	case dns.TypeAAAA:
 		var rr []dns.RR
-		for _, ip := range m.IPs {
+		for _, ip := range m.getIPs() {
 			if ip.To4() != nil {
 				// TODO(reddaly): IPv4 addresses could be encoded in IPv6 format and
 				// putinto AAAA records, but the current logic puts ipv4-encodable
@@ -273,7 +378,7 @@ func (m *MDNSService) instanceRecords(q dns.Question) []dns.RR {
 			},
 			Priority: 10,
 			Weight:   1,
-			Port:     uint16(m.Port),
+			Port:     uint16(*m.Port),
 			Target:   m.HostName,
 		}
 		recs := []dns.RR{srv}
@@ -299,7 +404,7 @@ func (m *MDNSService) instanceRecords(q dns.Question) []dns.RR {
 				Class:  dns.ClassINET,
 				Ttl:    defaultTTL,
 			},
-			Txt: m.TXT,
+			Txt: *m.TXT,
 		}
 		return []dns.RR{txt}
 	}

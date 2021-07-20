@@ -12,20 +12,20 @@ import (
 )
 
 const (
-	ipv4mdns = "224.0.0.251"
-	ipv6mdns = "ff02::fb"
+	ipv4mdnsString = "224.0.0.251"
+	ipv6mdnsString = "ff02::fb"
 )
 
 var (
+	useIpv6               = false
 	mdnsPort              = 5353
 	forceUnicastResponses = true
-
-	ipv4Addr = &net.UDPAddr{
-		IP:   net.ParseIP(ipv4mdns),
+	ipv4Addr              = &net.UDPAddr{
+		IP:   net.ParseIP(ipv4mdnsString),
 		Port: mdnsPort,
 	}
 	ipv6Addr = &net.UDPAddr{
-		IP:   net.ParseIP(ipv6mdns),
+		IP:   net.ParseIP(ipv6mdnsString),
 		Port: mdnsPort,
 	}
 )
@@ -57,14 +57,27 @@ type Server struct {
 	shutdownCh chan struct{}
 }
 
+func init() {
+
+	//	ipv6Addr.IP = nil
+}
+
 func InitPort(port int) {
 	mdnsPort = port
-	ipv4Addr.Port = port
-	ipv6Addr.Port = port
+	if ipv4Addr != nil {
+		ipv4Addr.Port = port
+	}
+	if ipv6Addr != nil {
+		ipv6Addr.Port = port
+	}
 }
 
 func ConfigForceUnicast(val bool) {
 	forceUnicastResponses = val
+}
+
+func ConfigUseIpv6(val bool) {
+	useIpv6 = val
 }
 
 func InitMaddr(ip4, ip6 string) {
@@ -75,8 +88,11 @@ func InitMaddr(ip4, ip6 string) {
 // NewServer is used to create a new mDNS server from a config
 func NewServer(config *Config) (*Server, error) {
 	// Create the listeners
+	var ipv6List *net.UDPConn
 	ipv4List, _ := net.ListenMulticastUDP("udp4", config.Iface, ipv4Addr)
-	ipv6List, _ := net.ListenMulticastUDP("udp6", config.Iface, ipv6Addr)
+	if useIpv6 {
+		ipv6List, _ = net.ListenMulticastUDP("udp6", config.Iface, ipv6Addr)
+	}
 
 	// Check if we have any listener
 	if ipv4List == nil && ipv6List == nil {

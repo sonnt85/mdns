@@ -111,15 +111,23 @@ type client struct {
 // NewClient creates a new mdns Client that can be used to query
 // for records
 func newClient() (*client, error) {
+	var err error
 	// TODO(reddaly): At least attempt to bind to the port required in the spec.
 	// Create a IPv4 listener
 	uconn4, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
 		log.Warnf("[ERR] mdns: Failed to bind to udp4 port: %v", err)
 	}
-	uconn6, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6zero, Port: 0})
-	if err != nil {
-		log.Warnf("[ERR] mdns: Failed to bind to udp6 port: %v", err)
+	var mconn6, uconn6 *net.UDPConn
+	if useIpv6 {
+		if uconn6, err = net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6zero, Port: 0}); err != nil {
+			log.Warnf("[ERR] mdns: Failed to bind to udp6 port: %v", err)
+		}
+		if mconn6, err = net.ListenMulticastUDP("udp6", nil, ipv6Addr); err != nil {
+			if len(ipv6Addr.IP) != 0 {
+				log.Warnf("mdns: Failed to bind to udp6 port: %v", err)
+			}
+		}
 	}
 
 	if uconn4 == nil && uconn6 == nil {
@@ -130,12 +138,6 @@ func newClient() (*client, error) {
 	if err != nil {
 		if len(ipv4Addr.IP) != 0 {
 			log.Warnf("mdns: Failed to bind to udp4 port: %v", err)
-		}
-	}
-	mconn6, err := net.ListenMulticastUDP("udp6", nil, ipv6Addr)
-	if err != nil {
-		if len(ipv6Addr.IP) != 0 {
-			log.Warnf("mdns: Failed to bind to udp6 port: %v", err)
 		}
 	}
 
@@ -182,29 +184,33 @@ func (c *client) Close() error {
 // setInterface is used to set the query interface, uses system
 // default if not provided
 func (c *client) setInterface(iface *net.Interface) error {
-	p := ipv4.NewPacketConn(c.ipv4UnicastConn)
-	if err := p.SetMulticastInterface(iface); err != nil {
-		return err
-	}
-
-	p2 := ipv6.NewPacketConn(c.ipv6UnicastConn)
-	if err := p2.SetMulticastInterface(iface); err != nil {
-		return err
-	}
-
 	if c.ipv4MulticastConn == nil && c.ipv6MulticastConn == nil {
 		return fmt.Errorf("Can not set any interrface  iptype [ip4, ip6]")
 	}
 
+	if c.ipv4UnicastConn != nil {
+		p := ipv4.NewPacketConn(c.ipv4UnicastConn)
+		if err := p.SetMulticastInterface(iface); err != nil {
+			return err
+		}
+	}
+
+	if c.ipv6UnicastConn != nil {
+		p2 := ipv6.NewPacketConn(c.ipv6UnicastConn)
+		if err := p2.SetMulticastInterface(iface); err != nil {
+			return err
+		}
+	}
+
 	if c.ipv4MulticastConn != nil {
-		p = ipv4.NewPacketConn(c.ipv4MulticastConn)
+		p := ipv4.NewPacketConn(c.ipv4MulticastConn)
 		if err := p.SetMulticastInterface(iface); err != nil {
 			return err
 		}
 	}
 
 	if c.ipv6MulticastConn != nil {
-		p2 = ipv6.NewPacketConn(c.ipv6MulticastConn)
+		p2 := ipv6.NewPacketConn(c.ipv6MulticastConn)
 		if err := p2.SetMulticastInterface(iface); err != nil {
 			return err
 		}
@@ -239,7 +245,6 @@ func (c *client) query(params *QueryParam) error {
 	m.RecursionDesired = false
 	if err := c.sendQuery(m); err != nil {
 		fmt.Println("query", err)
-
 		return err
 	}
 
