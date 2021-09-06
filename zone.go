@@ -29,8 +29,8 @@ type MDNSService struct {
 	HostName string // Host machine DNS name (e.g. "mymachine.net.")
 	Port     *int   // Service Port
 	//	IPs      []net.IP    // IP addresses for the service's host
-	IPsI interface{} // IP addresses for the service's host
-	TXT  *[]string   // Service TXT records
+	IPs interface{} // IP addresses for the service's host
+	TXT interface{} // Service TXT records
 
 	serviceAddr  string // Fully qualified service address
 	instanceAddr string // Fully qualified instance address
@@ -159,7 +159,7 @@ func NewMDNSService(instance, service, domain, hostName string, portI interface{
 		HostName: hostName,
 		Port:     port,
 		//		IPs:          ips,
-		IPsI:         ipsI,
+		IPs:          ipsI,
 		TXT:          txt,
 		serviceAddr:  fmt.Sprintf("%s.%s.", trimDot(service), trimDot(domain)),
 		instanceAddr: fmt.Sprintf("%s.%s.%s.", instance, trimDot(service), trimDot(domain)),
@@ -183,18 +183,18 @@ func i2netIP(i interface{}) (ips []net.IP) {
 		ips = **v
 	case *[]string:
 		for _, ipstr := range *v {
-			if ip := net.ParseIP(ipstr); ip != nil {
+			if ip := net.ParseIP(ipstr); ip != nil && (ip.To4() != nil || ip.To16() != nil) {
 				ips = append(ips, ip)
 			}
 		}
 	case *(*[]string):
 		for _, ipstr := range **v {
-			if ip := net.ParseIP(ipstr); ip != nil {
+			if ip := net.ParseIP(ipstr); ip != nil && (ip.To4() != nil || ip.To16() != nil) {
 				ips = append(ips, ip)
 			}
 		}
 	case string:
-		if ip := net.ParseIP(v); ip != nil {
+		if ip := net.ParseIP(v); ip != nil && (ip.To4() != nil || ip.To16() != nil) {
 			ips = []net.IP{ip}
 		}
 	case *string:
@@ -202,15 +202,16 @@ func i2netIP(i interface{}) (ips []net.IP) {
 			ips = []net.IP{ip}
 		}
 	case **string:
-		if ip := net.ParseIP(**v); ip != nil {
+		if ip := net.ParseIP(**v); ip != nil && (ip.To4() != nil || ip.To16() != nil) {
 			ips = []net.IP{ip}
 		}
 	default:
 	}
 	return ips
 }
+
 func (m *MDNSService) getIPs() (ips []net.IP) {
-	ips = i2netIP(m.IPsI)
+	ips = i2netIP(m.IPs)
 	//	if len(ips) == 0 {
 	//		ips = m.IPs
 	//	}
@@ -236,6 +237,21 @@ func (m *MDNSService) getIPs() (ips []net.IP) {
 	//		}
 	//	}
 	return ips
+}
+
+func (m *MDNSService) gettxt() (txt []string) {
+	switch v := m.TXT.(type) {
+	case *[]string:
+		txt = *v
+	case *(*[]string):
+		txt = **v
+	case string:
+		txt = []string{v}
+	case *string:
+		txt = []string{*v}
+	default:
+	}
+	return txt
 }
 
 // Records returns DNS records in response to a DNS question.
@@ -404,7 +420,7 @@ func (m *MDNSService) instanceRecords(q dns.Question) []dns.RR {
 				Class:  dns.ClassINET,
 				Ttl:    defaultTTL,
 			},
-			Txt: *m.TXT,
+			Txt: m.gettxt(),
 		}
 		return []dns.RR{txt}
 	}
