@@ -15,9 +15,9 @@ func makeService(t *testing.T) *MDNSService {
 
 func makeServiceWithServiceName(t *testing.T, service string) *MDNSService {
 	m, err := NewMDNSService(
-		"hostname",
-		service,
-		"local.",
+		"hostname", //unique instance
+		service,    //service name
+		"local.",   //domain
 		"testhost.",
 		80, // port
 		[]net.IP{net.IP([]byte{192, 168, 0, 42}), net.ParseIP("2620:0:1000:1900:b0c2:d0b2:c411:18bc")},
@@ -154,7 +154,7 @@ func TestMDNSService_InstanceAddr_SRV(t *testing.T) {
 		t.Fatalf("bad: %v", recs[2])
 	}
 
-	if srv.Port != uint16(s.Port) {
+	if srv.Port != uint16(*s.Port) {
 		t.Fatalf("bad: %v", recs[0])
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sonnt85/gosutils/ppjson"
 )
 
 func TestServer_StartStop(t *testing.T) {
@@ -21,32 +23,38 @@ func TestServer_Lookup(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	defer serv.Shutdown()
-
-	entries := make(chan *ServiceEntry, 1)
+	timeout := time.Second * 300
+	serviceName := "_services._dns-sd._udp"
+	entries := make(chan *ServiceEntry, 5)
 	var found int32 = 0
 	go func() {
 		select {
 		case e := <-entries:
-			if e.Name != "hostname._foobar._tcp.local." {
-				t.Fatalf("bad: %v", e)
-			}
-			if e.Port != 80 {
-				t.Fatalf("bad: %v", e)
-			}
-			if e.Info != "Local web server" {
-				t.Fatalf("bad: %v", e)
+			// fmt.Println(e)
+			ppjson.Println(e)
+			if serviceName != "_services._dns-sd._udp" {
+				if e.Name != "hostname._foobar._tcp.local." {
+					t.Fatalf("bad: %v", e)
+				}
+				if e.Port != 80 {
+					t.Fatalf("bad: %v", e)
+				}
+				if e.Info != "Local web server" {
+					t.Fatalf("bad: %v", e)
+				}
 			}
 			atomic.StoreInt32(&found, 1)
 
-		case <-time.After(80 * time.Millisecond):
+		case <-time.After(timeout):
 			t.Fatalf("timeout")
 		}
 	}()
 
 	params := &QueryParam{
-		Service: "_foobar._tcp",
+		// Service: "_foobar._tcp",
+		Service: serviceName,
 		Domain:  "local",
-		Timeout: 50 * time.Millisecond,
+		Timeout: timeout,
 		Entries: entries,
 	}
 	err = Query(params)

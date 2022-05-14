@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -185,7 +186,7 @@ func (c *client) Close() error {
 // default if not provided
 func (c *client) setInterface(iface *net.Interface) error {
 	if c.ipv4MulticastConn == nil && c.ipv6MulticastConn == nil {
-		return fmt.Errorf("Can not set any interrface  iptype [ip4, ip6]")
+		return fmt.Errorf("can not set any interrface  iptype [ip4, ip6]")
 	}
 
 	if c.ipv4UnicastConn != nil {
@@ -218,10 +219,30 @@ func (c *client) setInterface(iface *net.Interface) error {
 	return nil
 }
 
+func regexpMatch(parterm, strcompare string) bool {
+	rx, err := regexp.Compile(parterm)
+	if err != nil {
+		return false
+	}
+	// fmt.Printf("'%s' -> '%s'", parterm, strcompare)
+	return rx.MatchString(strcompare)
+}
+
 // query is used to perform a lookup and stream results
 func (c *client) query(params *QueryParam) error {
 	// Create the service name
+	rexpprefix := "_regexp_"
 	serviceAddr := fmt.Sprintf("%s.%s.", trimDot(params.Service), trimDot(params.Domain))
+	if strings.HasPrefix(serviceAddr, rexpprefix) {
+		strings.Split(serviceAddr, rexpprefix)
+		_, repartem, ok := strings.Cut(serviceAddr, rexpprefix)
+		if ok {
+			rexpprefix = ""
+			serviceAddr = repartem
+		}
+		// fmt.Println(serviceAddr)
+	}
+	sdServiceAddr := fmt.Sprintf("_services._dns-sd._udp.%s.", trimDot(params.Domain))
 
 	// Start listening for response packets
 	msgCh := make(chan *dns.Msg, 32)
@@ -232,7 +253,11 @@ func (c *client) query(params *QueryParam) error {
 
 	// Send the query
 	m := new(dns.Msg)
-	m.SetQuestion(serviceAddr, dns.TypePTR)
+	if len(rexpprefix) == 0 {
+		m.SetQuestion(sdServiceAddr, dns.TypePTR)
+	} else {
+		m.SetQuestion(serviceAddr, dns.TypePTR)
+	}
 	// RFC 6762, section 18.12.  Repurposing of Top Bit of qclass in Question
 	// Section
 	//
@@ -252,13 +277,15 @@ func (c *client) query(params *QueryParam) error {
 	inprogress := make(map[string]*ServiceEntry)
 
 	// Listen until we reach the timeout
-	finish := time.After(params.Timeout)
+	finishTimer := time.NewTimer(params.Timeout)
+	stratTime := time.Now()
 	for {
 		select {
 		case resp := <-msgCh:
 			var inp *ServiceEntry
 			for _, answer := range append(resp.Answer, resp.Extra...) {
 				// TODO(reddaly): Check that response corresponds to serviceAddr?
+				// fmt.Println("\nanswer -> ", answer)
 				switch rr := answer.(type) {
 				case *dns.PTR:
 					// Create new entry for this
@@ -272,7 +299,8 @@ func (c *client) query(params *QueryParam) error {
 
 					// Get the port
 					inp = ensureName(inprogress, rr.Hdr.Name)
-					if !strings.HasSuffix(inp.Name, serviceAddr) {
+
+					if !strings.HasSuffix(inp.Name, serviceAddr) && sdServiceAddr != serviceAddr && !regexpMatch(serviceAddr, inp.Name) {
 						break
 					}
 					inp.Host = rr.Target
@@ -281,7 +309,7 @@ func (c *client) query(params *QueryParam) error {
 				case *dns.TXT:
 					// Pull out the txt
 					inp = ensureName(inprogress, rr.Hdr.Name)
-					if !strings.HasSuffix(inp.Name, serviceAddr) {
+					if !strings.HasSuffix(inp.Name, serviceAddr) && sdServiceAddr != serviceAddr && !regexpMatch(serviceAddr, inp.Name) {
 						break
 					}
 					inp.Info = strings.Join(rr.Txt, "|")
@@ -291,7 +319,7 @@ func (c *client) query(params *QueryParam) error {
 				case *dns.A:
 					// Pull out the IP
 					inp = ensureName(inprogress, rr.Hdr.Name)
-					if !strings.HasSuffix(inp.Name, serviceAddr) {
+					if !strings.HasSuffix(inp.Name, serviceAddr) && sdServiceAddr != serviceAddr && !regexpMatch(serviceAddr, inp.Name) {
 						break
 					}
 					inp.Addr = rr.A // @Deprecated
@@ -300,7 +328,7 @@ func (c *client) query(params *QueryParam) error {
 				case *dns.AAAA:
 					// Pull out the IP
 					inp = ensureName(inprogress, rr.Hdr.Name)
-					if !strings.HasSuffix(rr.Hdr.Name, serviceAddr) {
+					if !strings.HasSuffix(rr.Hdr.Name, serviceAddr) && sdServiceAddr != serviceAddr && !regexpMatch(serviceAddr, rr.Hdr.Name) {
 						break
 					}
 					inp.Addr = rr.AAAA // @Deprecated
@@ -318,8 +346,11 @@ func (c *client) query(params *QueryParam) error {
 					continue
 				}
 				inp.sent = true
+				if stratTime.Add(params.Timeout * 4).After(time.Now()) { //reset if read ok
+					finishTimer.Reset(params.Timeout)
+				}
 				select {
-				case params.Entries <- inp:
+				case params.Entries <- inp: //sen result to Entries
 				default:
 				}
 			} else {
@@ -331,7 +362,7 @@ func (c *client) query(params *QueryParam) error {
 					log.Printf("[ERR] mdns: Failed to query instance %s: %v", inp.Name, err)
 				}
 			}
-		case <-finish:
+		case <-finishTimer.C:
 			return nil
 		}
 	}
