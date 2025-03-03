@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
+	// log "github.com/sirupsen/logrus"
 	"github.com/miekg/dns"
+	log "github.com/sonnt85/gosutils/slogrus"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
@@ -72,7 +72,7 @@ func Query(params *QueryParam) error {
 
 	// Set the multicast interface
 	if params.Interface != nil {
-		//		log.Infof("params.Interface.Name %#v", params.Interface)
+		//		log.InfofS("params.Interface.Name %#v", params.Interface)
 		if err := client.setInterface(params.Interface); err != nil {
 			return err
 		}
@@ -117,16 +117,16 @@ func newClient() (*client, error) {
 	// Create a IPv4 listener
 	uconn4, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
-		log.Warnf("[ERR] mdns: Failed to bind to udp4 port: %v", err)
+		log.WarnfS("[ERR] mdns: Failed to bind to udp4 port: %v", err)
 	}
 	var mconn6, uconn6 *net.UDPConn
 	if useIpv6 {
 		if uconn6, err = net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6zero, Port: 0}); err != nil {
-			log.Warnf("[ERR] mdns: Failed to bind to udp6 port: %v", err)
+			log.WarnfS("[ERR] mdns: Failed to bind to udp6 port: %v", err)
 		}
 		if mconn6, err = net.ListenMulticastUDP("udp6", nil, ipv6Addr); err != nil {
 			if len(ipv6Addr.IP) != 0 {
-				log.Warnf("mdns: Failed to bind to udp6 port: %v", err)
+				log.WarnfS("mdns: Failed to bind to udp6 port: %v", err)
 			}
 		}
 	}
@@ -138,7 +138,7 @@ func newClient() (*client, error) {
 	mconn4, err := net.ListenMulticastUDP("udp4", nil, ipv4Addr)
 	if err != nil {
 		if len(ipv4Addr.IP) != 0 {
-			log.Warnf("mdns: Failed to bind to udp4 port: %v", err)
+			log.WarnfS("mdns: Failed to bind to udp4 port: %v", err)
 		}
 	}
 
@@ -163,7 +163,7 @@ func (c *client) Close() error {
 		return nil
 	}
 
-	//	log.Printf("[INFO] mdns: Closing client %v", *c)
+	//	log.PrintfS("[INFO] mdns: Closing client %v", *c)
 	close(c.closedCh)
 
 	if c.ipv4UnicastConn != nil {
@@ -231,7 +231,7 @@ func regexpMatch(parterm, strcompare string) bool {
 // query is used to perform a lookup and stream results
 func (c *client) query(params *QueryParam) error {
 	// Create the service name
-	rexpprefix := "_regexp_"
+	rexpprefix := "~"
 	serviceAddr := fmt.Sprintf("%s.%s.", trimDot(params.Service), trimDot(params.Domain))
 	if strings.HasPrefix(serviceAddr, rexpprefix) {
 		strings.Split(serviceAddr, rexpprefix)
@@ -359,7 +359,7 @@ func (c *client) query(params *QueryParam) error {
 				m.SetQuestion(inp.Name, dns.TypePTR)
 				m.RecursionDesired = false
 				if err := c.sendQuery(m); err != nil {
-					log.Printf("[ERR] mdns: Failed to query instance %s: %v", inp.Name, err)
+					log.PrintfS("[ERR] mdns: Failed to query instance %s: %v", inp.Name, err)
 				}
 			}
 		case <-finishTimer.C:
@@ -417,12 +417,12 @@ func (c *client) recv(l *net.UDPConn, msgCh chan *dns.Msg) {
 		}
 
 		if err != nil {
-			log.Printf("[ERR] mdns: Failed to read packet: %v", err)
+			log.PrintfS("[ERR] mdns: Failed to read packet: %v", err)
 			continue
 		}
 		msg := new(dns.Msg)
 		if err := msg.Unpack(buf[:n]); err != nil {
-			log.Printf("[ERR] mdns: Failed to unpack packet: %v", err)
+			log.PrintfS("[ERR] mdns: Failed to unpack packet: %v", err)
 			continue
 		}
 		select {

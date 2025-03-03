@@ -6,7 +6,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/sonnt85/gosutils/slogrus"
+
+	// log "github.com/sirupsen/logrus"
 
 	"github.com/miekg/dns"
 )
@@ -148,7 +150,7 @@ func (s *Server) recv(c *net.UDPConn) {
 			continue
 		}
 		if err := s.parsePacket(buf[:n], from); err != nil {
-			log.Printf("[ERR] mdns: Failed to handle query: %v", err)
+			log.PrintfS("[ERR] mdns: Failed to handle query: %v", err)
 		}
 	}
 }
@@ -157,7 +159,7 @@ func (s *Server) recv(c *net.UDPConn) {
 func (s *Server) parsePacket(packet []byte, from net.Addr) error {
 	var msg dns.Msg
 	if err := msg.Unpack(packet); err != nil {
-		log.Printf("[ERR] mdns: Failed to unpack packet: %v", err)
+		log.PrintfS("[ERR] mdns: Failed to unpack packet: %v", err)
 		return err
 	}
 	return s.handleQuery(&msg, from)
@@ -256,7 +258,7 @@ func (s *Server) handleQuery(query *dns.Msg, from net.Addr) error {
 		for i, q := range query.Question {
 			questions[i] = q.Name
 		}
-		log.Printf("no responses for query with questions: %s", strings.Join(questions, ", "))
+		log.PrintfS("no responses for query with questions: %s", strings.Join(questions, ", "))
 	}
 
 	if mresp := resp(false); mresp != nil {
