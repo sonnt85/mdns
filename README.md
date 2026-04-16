@@ -35,3 +35,8 @@ Doing a lookup for service providers is also very simple:
     mdns.Lookup("_foobar._tcp", entriesCh)
     close(entriesCh)
 
+
+## Author
+
+**sonnt85** — [thanhson.rf@gmail.com](mailto:thanhson.rf@gmail.com)
+
