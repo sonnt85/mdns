@@ -1,7 +1,6 @@
 package mdns
 
 import (
-	"encoding/json"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,11 +27,12 @@ func TestServer_Lookup(t *testing.T) {
 	var found int32 = 0
 	var errMsg atomic.Value
 	go func() {
+		// Note: do not call t.Logf/t.Fatalf here. This goroutine may race
+		// with the parent test returning (e.g. after t.Fatalf on Query or
+		// the assertions below). Communicate results through errMsg
+		// (atomic.Value) and the `found` atomic counter instead.
 		select {
 		case e := <-entries:
-			if b, err := json.MarshalIndent(e, "", "  "); err == nil {
-				t.Logf("entry: %s", b)
-			}
 			if serviceName != "_services._dns-sd._udp" {
 				if e.Name != "hostname._foobar._tcp.local." {
 					errMsg.Store("bad name: " + e.Name)
