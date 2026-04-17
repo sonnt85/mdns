@@ -1,10 +1,13 @@
 # mdns
 
 [![GoDoc](https://pkg.go.dev/badge/github.com/sonnt85/mdns.svg)](https://pkg.go.dev/github.com/sonnt85/mdns)
+[![Go Report Card](https://goreportcard.com/badge/github.com/sonnt85/mdns)](https://goreportcard.com/report/github.com/sonnt85/mdns)
 
 **The only Go mDNS library with regex-based service discovery.**
 
-Includes `mdns-grep` — a cross-platform CLI tool for discovering mDNS services using regex patterns. Pre-built binaries available in [Releases](https://github.com/sonnt85/mdns/releases).
+> Other mDNS libraries only support exact service name lookup. This library lets you use regex patterns to discover services — like `grep` for your local network.
+
+Includes **`mdns-grep`** — a cross-platform CLI tool. Download from [Releases](https://github.com/sonnt85/mdns/releases).
 
 ```bash
 mdns-grep                              # enumerate all services
@@ -13,6 +16,28 @@ mdns-grep -regex '_https?._tcp'        # regex: HTTP + HTTPS
 mdns-grep -scan -timeout 10s           # full 2-phase network scan
 mdns-grep -json _ipp._tcp              # JSON output
 ```
+
+### Why this library?
+
+| Feature | sonnt85/mdns | hashicorp/mdns | grandcat/zeroconf | brutella/dnssd |
+|---------|:---:|:---:|:---:|:---:|
+| **Regex service discovery** | **Yes** | No | No | No |
+| **2-phase network scan** | **Yes** | No | No | No |
+| **CLI tool (mdns-grep)** | **Yes** | No | No | Yes |
+| **Configurable port/multicast addr** | **Yes** | No | No | No |
+| Minimal dependencies | 5 | 5 | 8 | 12 |
+| IPv4 + IPv6 | Yes | Yes | Yes | Yes |
+
+### Download mdns-grep
+
+Pre-built binaries for 14 platforms — no Go installation required:
+
+| OS | Architecture | Download |
+|----|-------------|----------|
+| **Linux** | x86_64, ARM64, ARMv7, x86, MIPS, RISC-V | [Releases](https://github.com/sonnt85/mdns/releases) |
+| **macOS** | Intel, Apple Silicon (M1/M2/M3/M4) | [Releases](https://github.com/sonnt85/mdns/releases) |
+| **Windows** | x64, ARM64 | [Releases](https://github.com/sonnt85/mdns/releases) |
+| **FreeBSD** | x64, ARM64, ARM | [Releases](https://github.com/sonnt85/mdns/releases) |
 
 ---
 
