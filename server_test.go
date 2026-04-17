@@ -2,7 +2,6 @@ package mdns
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -32,7 +31,7 @@ func TestServer_Lookup(t *testing.T) {
 		select {
 		case e := <-entries:
 			if b, err := json.MarshalIndent(e, "", "  "); err == nil {
-				fmt.Println(string(b))
+				t.Logf("entry: %s", b)
 			}
 			if serviceName != "_services._dns-sd._udp" {
 				if e.Name != "hostname._foobar._tcp.local." {
