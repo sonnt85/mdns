@@ -6,9 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	log "github.com/sonnt85/gosutils/slogrus"
-
-	// log "github.com/sirupsen/logrus"
+	"log"
 
 	"github.com/miekg/dns"
 )
@@ -145,12 +143,14 @@ func (s *Server) recv(c *net.UDPConn) {
 	buf := make([]byte, 65536)
 	for atomic.LoadInt32(&s.shutdown) == 0 {
 		n, from, err := c.ReadFrom(buf)
-
+		if atomic.LoadInt32(&s.shutdown) == 1 {
+			return
+		}
 		if err != nil {
 			continue
 		}
 		if err := s.parsePacket(buf[:n], from); err != nil {
-			log.PrintfS("[ERR] mdns: Failed to handle query: %v", err)
+			log.Printf("[ERR] mdns: Failed to handle query: %v", err)
 		}
 	}
 }
@@ -159,7 +159,7 @@ func (s *Server) recv(c *net.UDPConn) {
 func (s *Server) parsePacket(packet []byte, from net.Addr) error {
 	var msg dns.Msg
 	if err := msg.Unpack(packet); err != nil {
-		log.PrintfS("[ERR] mdns: Failed to unpack packet: %v", err)
+		log.Printf("[ERR] mdns: Failed to unpack packet: %v", err)
 		return err
 	}
 	return s.handleQuery(&msg, from)
@@ -258,7 +258,7 @@ func (s *Server) handleQuery(query *dns.Msg, from net.Addr) error {
 		for i, q := range query.Question {
 			questions[i] = q.Name
 		}
-		log.PrintfS("no responses for query with questions: %s", strings.Join(questions, ", "))
+		log.Printf("no responses for query with questions: %s", strings.Join(questions, ", "))
 	}
 
 	if mresp := resp(false); mresp != nil {
@@ -312,12 +312,20 @@ func (s *Server) sendResponse(resp *dns.Msg, from net.Addr, unicast bool) error 
 	}
 
 	// Determine the socket to send from
-	addr := from.(*net.UDPAddr)
+	addr, ok := from.(*net.UDPAddr)
+	if !ok {
+		return fmt.Errorf("mdns: unexpected address type %T", from)
+	}
 	if addr.IP.To4() != nil {
+		if s.ipv4List == nil {
+			return fmt.Errorf("mdns: no IPv4 listener to send response")
+		}
 		_, err = s.ipv4List.WriteToUDP(buf, addr)
 		return err
-	} else {
-		_, err = s.ipv6List.WriteToUDP(buf, addr)
-		return err
 	}
+	if s.ipv6List == nil {
+		return fmt.Errorf("mdns: no IPv6 listener to send response")
+	}
+	_, err = s.ipv6List.WriteToUDP(buf, addr)
+	return err
 }

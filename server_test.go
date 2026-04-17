@@ -1,11 +1,11 @@
 package mdns
 
 import (
+	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/sonnt85/gosutils/ppjson"
 )
 
 func TestServer_StartStop(t *testing.T) {
@@ -27,31 +27,35 @@ func TestServer_Lookup(t *testing.T) {
 	serviceName := "_services._dns-sd._udp"
 	entries := make(chan *ServiceEntry, 5)
 	var found int32 = 0
+	var errMsg atomic.Value
 	go func() {
 		select {
 		case e := <-entries:
-			// fmt.Println(e)
-			ppjson.Println(e)
+			if b, err := json.MarshalIndent(e, "", "  "); err == nil {
+				fmt.Println(string(b))
+			}
 			if serviceName != "_services._dns-sd._udp" {
 				if e.Name != "hostname._foobar._tcp.local." {
-					t.Fatalf("bad: %v", e)
+					errMsg.Store("bad name: " + e.Name)
+					return
 				}
 				if e.Port != 80 {
-					t.Fatalf("bad: %v", e)
+					errMsg.Store("bad port")
+					return
 				}
 				if e.Info != "Local web server" {
-					t.Fatalf("bad: %v", e)
+					errMsg.Store("bad info: " + e.Info)
+					return
 				}
 			}
 			atomic.StoreInt32(&found, 1)
 
 		case <-time.After(timeout):
-			t.Fatalf("timeout")
+			errMsg.Store("timeout waiting for entry")
 		}
 	}()
 
 	params := &QueryParam{
-		// Service: "_foobar._tcp",
 		Service: serviceName,
 		Domain:  "local",
 		Timeout: timeout,
@@ -60,6 +64,9 @@ func TestServer_Lookup(t *testing.T) {
 	err = Query(params)
 	if err != nil {
 		t.Fatalf("err: %v", err)
+	}
+	if msg := errMsg.Load(); msg != nil {
+		t.Fatalf("goroutine error: %v", msg)
 	}
 	if atomic.LoadInt32(&found) == 0 {
 		t.Fatalf("record not found")

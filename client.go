@@ -6,12 +6,13 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	// log "github.com/sirupsen/logrus"
+	"log"
+
 	"github.com/miekg/dns"
-	log "github.com/sonnt85/gosutils/slogrus"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
@@ -117,16 +118,16 @@ func newClient() (*client, error) {
 	// Create a IPv4 listener
 	uconn4, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
-		log.WarnfS("[ERR] mdns: Failed to bind to udp4 port: %v", err)
+		log.Printf("[ERR] mdns: Failed to bind to udp4 port: %v", err)
 	}
 	var mconn6, uconn6 *net.UDPConn
 	if useIpv6 {
 		if uconn6, err = net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6zero, Port: 0}); err != nil {
-			log.WarnfS("[ERR] mdns: Failed to bind to udp6 port: %v", err)
+			log.Printf("[ERR] mdns: Failed to bind to udp6 port: %v", err)
 		}
 		if mconn6, err = net.ListenMulticastUDP("udp6", nil, ipv6Addr); err != nil {
 			if len(ipv6Addr.IP) != 0 {
-				log.WarnfS("mdns: Failed to bind to udp6 port: %v", err)
+				log.Printf("mdns: Failed to bind to udp6 port: %v", err)
 			}
 		}
 	}
@@ -138,7 +139,7 @@ func newClient() (*client, error) {
 	mconn4, err := net.ListenMulticastUDP("udp4", nil, ipv4Addr)
 	if err != nil {
 		if len(ipv4Addr.IP) != 0 {
-			log.WarnfS("mdns: Failed to bind to udp4 port: %v", err)
+			log.Printf("mdns: Failed to bind to udp4 port: %v", err)
 		}
 	}
 
@@ -163,7 +164,7 @@ func (c *client) Close() error {
 		return nil
 	}
 
-	//	log.PrintfS("[INFO] mdns: Closing client %v", *c)
+	//	log.Printf("[INFO] mdns: Closing client %v", *c)
 	close(c.closedCh)
 
 	if c.ipv4UnicastConn != nil {
@@ -219,12 +220,18 @@ func (c *client) setInterface(iface *net.Interface) error {
 	return nil
 }
 
+// regexpCache stores compiled regex patterns to avoid recompilation on every call.
+var regexpCache sync.Map
+
 func regexpMatch(parterm, strcompare string) bool {
+	if cached, ok := regexpCache.Load(parterm); ok {
+		return cached.(*regexp.Regexp).MatchString(strcompare)
+	}
 	rx, err := regexp.Compile(parterm)
 	if err != nil {
 		return false
 	}
-	// fmt.Printf("'%s' -> '%s'", parterm, strcompare)
+	regexpCache.Store(parterm, rx)
 	return rx.MatchString(strcompare)
 }
 
@@ -234,7 +241,6 @@ func (c *client) query(params *QueryParam) error {
 	rexpprefix := "~"
 	serviceAddr := fmt.Sprintf("%s.%s.", trimDot(params.Service), trimDot(params.Domain))
 	if strings.HasPrefix(serviceAddr, rexpprefix) {
-		strings.Split(serviceAddr, rexpprefix)
 		_, repartem, ok := strings.Cut(serviceAddr, rexpprefix)
 		if ok {
 			rexpprefix = ""
@@ -246,10 +252,26 @@ func (c *client) query(params *QueryParam) error {
 
 	// Start listening for response packets
 	msgCh := make(chan *dns.Msg, 32)
-	go c.recv(c.ipv4UnicastConn, msgCh)
-	go c.recv(c.ipv6UnicastConn, msgCh)
-	go c.recv(c.ipv4MulticastConn, msgCh)
-	go c.recv(c.ipv6MulticastConn, msgCh)
+	var recvWg sync.WaitGroup
+	startRecv := func(conn *net.UDPConn) {
+		recvWg.Add(1)
+		go func() {
+			defer recvWg.Done()
+			c.recv(conn, msgCh)
+		}()
+	}
+	startRecv(c.ipv4UnicastConn)
+	startRecv(c.ipv6UnicastConn)
+	startRecv(c.ipv4MulticastConn)
+	startRecv(c.ipv6MulticastConn)
+
+	// Ensure recv goroutines are fully stopped and msgCh is closed on return
+	defer func() {
+		// Close client to unblock recv goroutines waiting on Read()
+		c.Close()
+		recvWg.Wait()
+		close(msgCh)
+	}()
 
 	// Send the query
 	m := new(dns.Msg)
@@ -278,7 +300,7 @@ func (c *client) query(params *QueryParam) error {
 
 	// Listen until we reach the timeout
 	finishTimer := time.NewTimer(params.Timeout)
-	stratTime := time.Now()
+	startTime := time.Now()
 	for {
 		select {
 		case resp := <-msgCh:
@@ -346,12 +368,13 @@ func (c *client) query(params *QueryParam) error {
 					continue
 				}
 				inp.sent = true
-				if stratTime.Add(params.Timeout * 4).After(time.Now()) { //reset if read ok
+				if startTime.Add(params.Timeout * 4).After(time.Now()) { //reset if read ok
 					finishTimer.Reset(params.Timeout)
 				}
 				select {
-				case params.Entries <- inp: //sen result to Entries
+				case params.Entries <- inp:
 				default:
+					log.Printf("[WARN] mdns: dropped service entry %q (Entries channel full)", inp.Name)
 				}
 			} else {
 				// Fire off a node specific query
@@ -359,7 +382,7 @@ func (c *client) query(params *QueryParam) error {
 				m.SetQuestion(inp.Name, dns.TypePTR)
 				m.RecursionDesired = false
 				if err := c.sendQuery(m); err != nil {
-					log.PrintfS("[ERR] mdns: Failed to query instance %s: %v", inp.Name, err)
+					log.Printf("[ERR] mdns: Failed to query instance %s: %v", inp.Name, err)
 				}
 			}
 		case <-finishTimer.C:
@@ -396,11 +419,11 @@ func (c *client) sendQuery(q *dns.Msg) error {
 			//			return err
 		}
 	}
-	if (cnterr == 0) || (cnterr != cntsend) {
-		return nil
-	} else {
-		return errors.New("Can not send query udp ipv6 and ipv4 \n" + errs)
+	// Return error only if ALL sends failed
+	if cntsend > 0 && cnterr == cntsend {
+		return errors.New("mdns: failed to send query on all interfaces\n" + errs)
 	}
+	return nil
 }
 
 // recv is used to receive until we get a shutdown
@@ -417,12 +440,12 @@ func (c *client) recv(l *net.UDPConn, msgCh chan *dns.Msg) {
 		}
 
 		if err != nil {
-			log.PrintfS("[ERR] mdns: Failed to read packet: %v", err)
+			log.Printf("[ERR] mdns: Failed to read packet: %v", err)
 			continue
 		}
 		msg := new(dns.Msg)
 		if err := msg.Unpack(buf[:n]); err != nil {
-			log.PrintfS("[ERR] mdns: Failed to unpack packet: %v", err)
+			log.Printf("[ERR] mdns: Failed to unpack packet: %v", err)
 			continue
 		}
 		select {

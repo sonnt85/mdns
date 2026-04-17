@@ -185,13 +185,19 @@ func (m *MDNSService) getIPs() (ips []net.IP) {
 func (m *MDNSService) gettxt() (txt []string) {
 	switch v := m.TXT.(type) {
 	case *[]string:
-		txt = *v
+		if v != nil {
+			txt = *v
+		}
 	case *(*[]string):
-		txt = **v
+		if v != nil && *v != nil {
+			txt = **v
+		}
 	case string:
 		txt = []string{v}
 	case *string:
-		txt = []string{*v}
+		if v != nil {
+			txt = []string{*v}
+		}
 	default:
 	}
 	return txt

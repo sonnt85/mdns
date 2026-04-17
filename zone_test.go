@@ -215,7 +215,7 @@ func TestMDNSService_InstanceAddr_TXT(t *testing.T) {
 	if !ok {
 		t.Fatalf("bad: %v", recs[0])
 	}
-	if got, want := txt.Txt, s.TXT; !reflect.DeepEqual(got, want) {
+	if got, want := txt.Txt, s.gettxt(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("TXT record mismatch for %v: got %v, want %v", recs[0], got, want)
 	}
 }
