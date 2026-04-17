@@ -1,18 +1,18 @@
-// Command mdns-discover is a lightweight mDNS service discovery tool.
+// Command mdns-grep is a lightweight mDNS service discovery tool.
 //
 // Usage:
 //
-//	mdns-discover [flags] [service]
+//	mdns-grep [flags] [service]
 //
 // Examples:
 //
-//	mdns-discover                          # enumerate all services
-//	mdns-discover _http._tcp               # find HTTP services
-//	mdns-discover -scan                    # full network scan (2-phase)
-//	mdns-discover -regex '_https?._tcp'    # regex match
-//	mdns-discover -json _ipp._tcp          # output as JSON
-//	mdns-discover -timeout 10s _ssh._tcp   # custom timeout
-//	mdns-discover -iface eth0 _http._tcp   # bind to specific interface
+//	mdns-grep                          # enumerate all services
+//	mdns-grep _http._tcp               # find HTTP services
+//	mdns-grep -scan                    # full network scan (2-phase)
+//	mdns-grep -regex '_https?._tcp'    # regex match
+//	mdns-grep -json _ipp._tcp          # output as JSON
+//	mdns-grep -timeout 10s _ssh._tcp   # custom timeout
+//	mdns-grep -iface eth0 _http._tcp   # bind to specific interface
 package main
 
 import (
@@ -87,8 +87,10 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("mdns-discover %s (commit: %s, built: %s)\n", version, gitCommit, buildTime)
+		fmt.Printf("mdns-grep %s (commit: %s, built: %s)\n", version, gitCommit, buildTime)
+		fmt.Printf("The only mDNS tool with regex-based service discovery\n")
 		fmt.Printf("Author: sonnt85 <thanhson.rf@gmail.com>\n")
+		fmt.Printf("Source: https://github.com/sonnt85/mdns\n")
 		return
 	}
 

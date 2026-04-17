@@ -2,6 +2,20 @@
 
 [![GoDoc](https://pkg.go.dev/badge/github.com/sonnt85/mdns.svg)](https://pkg.go.dev/github.com/sonnt85/mdns)
 
+**The only Go mDNS library with regex-based service discovery.**
+
+Includes `mdns-grep` — a cross-platform CLI tool for discovering mDNS services using regex patterns. Pre-built binaries available in [Releases](https://github.com/sonnt85/mdns/releases).
+
+```bash
+mdns-grep                              # enumerate all services
+mdns-grep _http._tcp                   # find HTTP services
+mdns-grep -regex '_https?._tcp'        # regex: HTTP + HTTPS
+mdns-grep -scan -timeout 10s           # full 2-phase network scan
+mdns-grep -json _ipp._tcp              # JSON output
+```
+
+---
+
 Simple mDNS client/server library in Golang. mDNS or Multicast DNS can be
 used to discover services on the local network without the use of an authoritative
 DNS server. This enables peer-to-peer discovery. It is important to note that many
