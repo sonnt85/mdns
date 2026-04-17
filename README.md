@@ -359,6 +359,20 @@ server, _ := mdns.NewServer(&mdns.Config{Zone: &myZone{}})
 defer server.Shutdown()
 ```
 
+## Contributing
+
+Contributions are welcome! Feel free to:
+
+- Open an [issue](https://github.com/sonnt85/mdns/issues) for bug reports or feature requests
+- Submit a pull request — all PRs are reviewed
+- Star the repo if you find it useful
+
+If you use `mdns-grep` or this library in your project, I'd love to hear about it.
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details. Free for personal and commercial use.
+
 ## Author
 
 **sonnt85** — [thanhson.rf@gmail.com](mailto:thanhson.rf@gmail.com)
