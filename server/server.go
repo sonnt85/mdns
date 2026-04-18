@@ -1,52 +1,17 @@
-package mdns
+package server
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"strings"
 	"sync/atomic"
 
-	"log"
-
 	"github.com/miekg/dns"
 )
 
-const (
-	ipv4mdnsString = "224.0.0.251"
-	ipv6mdnsString = "ff02::fb"
-)
-
-var (
-	useIpv6               = false
-	mdnsPort              = 5353
-	forceUnicastResponses = true
-	ipv4Addr              = &net.UDPAddr{
-		IP:   net.ParseIP(ipv4mdnsString),
-		Port: mdnsPort,
-	}
-	ipv6Addr = &net.UDPAddr{
-		IP:   net.ParseIP(ipv6mdnsString),
-		Port: mdnsPort,
-	}
-)
-
-// Config is used to configure the mDNS server
-type Config struct {
-	// Zone must be provided to support responding to queries
-	Zone Zone
-
-	// Iface if provided binds the multicast listener to the given
-	// interface. If not provided, the system default multicase interface
-	// is used.
-	Iface *net.Interface
-
-	// LogEmptyResponses indicates the server should print an informative message
-	// when there is an mDNS query for which the server has no response.
-	LogEmptyResponses bool
-}
-
-// mDNS server is used to listen for mDNS queries and respond if we
-// have a matching local record
+// Server listens for mDNS queries on the local network and answers
+// those matching the configured Zone.
 type Server struct {
 	Config *Config
 
@@ -57,50 +22,27 @@ type Server struct {
 	shutdownCh chan struct{}
 }
 
-func init() {
-
-	//	ipv6Addr.IP = nil
-}
-
-func InitPort(port int) {
-	mdnsPort = port
-	if ipv4Addr != nil {
-		ipv4Addr.Port = port
+// New creates a new mDNS server from a config and starts listening.
+func New(cfg *Config) (*Server, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("server: nil config")
 	}
-	if ipv6Addr != nil {
-		ipv6Addr.Port = port
+	if cfg.Zone == nil {
+		return nil, fmt.Errorf("server: missing Zone")
 	}
-}
 
-func ConfigForceUnicast(val bool) {
-	forceUnicastResponses = val
-}
-
-func ConfigUseIpv6(val bool) {
-	useIpv6 = val
-}
-
-func InitMaddr(ip4, ip6 string) {
-	ipv4Addr.IP = net.ParseIP(ip4)
-	ipv6Addr.IP = net.ParseIP(ip6)
-}
-
-// NewServer is used to create a new mDNS server from a config
-func NewServer(config *Config) (*Server, error) {
-	// Create the listeners
 	var ipv6List *net.UDPConn
-	ipv4List, _ := net.ListenMulticastUDP("udp4", config.Iface, ipv4Addr)
-	if useIpv6 {
-		ipv6List, _ = net.ListenMulticastUDP("udp6", config.Iface, ipv6Addr)
+	ipv4List, _ := net.ListenMulticastUDP("udp4", cfg.Iface, cfg.ipv4Addr())
+	if cfg.UseIPv6 {
+		ipv6List, _ = net.ListenMulticastUDP("udp6", cfg.Iface, cfg.ipv6Addr())
 	}
 
-	// Check if we have any listener
 	if ipv4List == nil && ipv6List == nil {
 		return nil, fmt.Errorf("no multicast listeners could be started")
 	}
 
 	s := &Server{
-		Config:     config,
+		Config:     cfg,
 		ipv4List:   ipv4List,
 		ipv6List:   ipv6List,
 		shutdownCh: make(chan struct{}),
@@ -109,7 +51,6 @@ func NewServer(config *Config) (*Server, error) {
 	if ipv4List != nil {
 		go s.recv(s.ipv4List)
 	}
-
 	if ipv6List != nil {
 		go s.recv(s.ipv6List)
 	}
@@ -117,25 +58,24 @@ func NewServer(config *Config) (*Server, error) {
 	return s, nil
 }
 
-// Shutdown is used to shutdown the listener
+// Shutdown closes the underlying listeners and stops answering queries.
 func (s *Server) Shutdown() error {
 	if !atomic.CompareAndSwapInt32(&s.shutdown, 0, 1) {
-		// something else already closed us
 		return nil
 	}
 
 	close(s.shutdownCh)
 
 	if s.ipv4List != nil {
-		s.ipv4List.Close()
+		_ = s.ipv4List.Close()
 	}
 	if s.ipv6List != nil {
-		s.ipv6List.Close()
+		_ = s.ipv6List.Close()
 	}
 	return nil
 }
 
-// recv is a long running routine to receive packets from an interface
+// recv is a long running routine to receive packets from an interface.
 func (s *Server) recv(c *net.UDPConn) {
 	if c == nil {
 		return
@@ -155,7 +95,7 @@ func (s *Server) recv(c *net.UDPConn) {
 	}
 }
 
-// parsePacket is used to parse an incoming packet
+// parsePacket is used to parse an incoming packet.
 func (s *Server) parsePacket(packet []byte, from net.Addr) error {
 	var msg dns.Msg
 	if err := msg.Unpack(packet); err != nil {
@@ -165,7 +105,7 @@ func (s *Server) parsePacket(packet []byte, from net.Addr) error {
 	return s.handleQuery(&msg, from)
 }
 
-// handleQuery is used to handle an incoming query
+// handleQuery is used to handle an incoming query.
 func (s *Server) handleQuery(query *dns.Msg, from net.Addr) error {
 	if query.Opcode != dns.OpcodeQuery {
 		// "In both multicast query and multicast response messages, the OPCODE MUST
@@ -193,7 +133,6 @@ func (s *Server) handleQuery(query *dns.Msg, from net.Addr) error {
 
 	var unicastAnswer, multicastAnswer []dns.RR
 
-	// Handle each question
 	for _, q := range query.Question {
 		mrecs, urecs := s.handleQuestion(q)
 		multicastAnswer = append(multicastAnswer, mrecs...)
@@ -203,7 +142,6 @@ func (s *Server) handleQuery(query *dns.Msg, from net.Addr) error {
 	// See section 18 of RFC 6762 for rules about DNS headers.
 	resp := func(unicast bool) *dns.Msg {
 		// 18.1: ID (Query Identifier)
-		// 0 for multicast response, query.Id for unicast response
 		id := uint16(0)
 		if unicast {
 			id = query.Id
@@ -241,12 +179,7 @@ func (s *Server) handleQuery(query *dns.Msg, from net.Addr) error {
 				// 18.10: CD (Checking Disabled) Bit
 				// 18.11: RCODE (Response Code)
 			},
-			// 18.12 pertains to questions (handled by handleQuestion)
-			// 18.13 pertains to resource records (handled by handleQuestion)
-
-			// 18.14: Name Compression - responses should be compressed (though see
-			// caveats in the RFC), so set the Compress bit (part of the dns library
-			// API, not part of the DNS packet) to true.
+			// 18.14: Name Compression.
 			Compress: true,
 
 			Answer: answer,
@@ -274,10 +207,11 @@ func (s *Server) handleQuery(query *dns.Msg, from net.Addr) error {
 	return nil
 }
 
-// handleQuestion is used to handle an incoming question
+// handleQuestion is used to handle an incoming question.
 //
-// The response to a question may be transmitted over multicast, unicast, or
-// both.  The return values are DNS records for each transmission type.
+// The response to a question may be transmitted over multicast,
+// unicast, or both. The return values are DNS records for each
+// transmission type.
 func (s *Server) handleQuestion(q dns.Question) (multicastRecs, unicastRecs []dns.RR) {
 	records := s.Config.Zone.Records(q)
 
@@ -296,22 +230,22 @@ func (s *Server) handleQuestion(q dns.Question) (multicastRecs, unicastRecs []dn
 	//     In the Question Section of a Multicast DNS query, the top bit of the
 	//     qclass field is used to indicate that unicast responses are preferred
 	//     for this particular question.  (See Section 5.4.)
-	if q.Qclass&(1<<15) != 0 || forceUnicastResponses {
+	if q.Qclass&(1<<15) != 0 || s.Config.ForceUnicast {
 		return nil, records
 	}
 	return records, nil
 }
 
-// sendResponse is used to send a response packet
+// sendResponse sends a response packet back to the querying peer.
 func (s *Server) sendResponse(resp *dns.Msg, from net.Addr, unicast bool) error {
 	// TODO(reddaly): Respect the unicast argument, and allow sending responses
 	// over multicast.
+	_ = unicast
 	buf, err := resp.Pack()
 	if err != nil {
 		return err
 	}
 
-	// Determine the socket to send from
 	addr, ok := from.(*net.UDPAddr)
 	if !ok {
 		return fmt.Errorf("mdns: unexpected address type %T", from)

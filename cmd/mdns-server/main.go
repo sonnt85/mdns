@@ -16,7 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sonnt85/mdns"
+	"github.com/sonnt85/mdns/server"
+	"github.com/sonnt85/mdns/service"
 )
 
 var version = "dev"
@@ -33,7 +34,7 @@ func main() {
 	var (
 		host    string
 		ips     string
-		service string
+		serviceName string
 		domain  string
 		port    int
 		txt     stringsFlag
@@ -48,7 +49,7 @@ func main() {
 
 	flag.StringVar(&host, "host", defHost, "hostname to advertise (without .local)")
 	flag.StringVar(&ips, "ip", "auto", "comma-separated IPs, or 'auto' to detect non-loopback addrs")
-	flag.StringVar(&service, "service", "_workstation._tcp", "service type")
+	flag.StringVar(&serviceName, "service", "_workstation._tcp", "service type")
 	flag.StringVar(&domain, "domain", "local", "domain")
 	flag.IntVar(&port, "port", 22, "service port")
 	flag.Var(&txt, "txt", "TXT record (repeatable, e.g. -txt key=val)")
@@ -88,9 +89,9 @@ func main() {
 		txtRecords = []string{"mdns-server=" + version}
 	}
 
-	svc, err := mdns.NewMDNSService(host, service, domain+".", hostFQDN, port, ipList, txtRecords)
+	svc, err := service.New(host, serviceName, domain+".", hostFQDN, port, ipList, txtRecords)
 	if err != nil {
-		log.Fatalf("NewMDNSService: %v", err)
+		log.Fatalf("service.New: %v", err)
 	}
 
 	var bindIface *net.Interface
@@ -101,16 +102,16 @@ func main() {
 		}
 	}
 
-	server, err := mdns.NewServer(&mdns.Config{Zone: svc, Iface: bindIface})
+	srv, err := server.New(&server.Config{Zone: svc, Iface: bindIface})
 	if err != nil {
-		log.Fatalf("NewServer: %v", err)
+		log.Fatalf("server.New: %v", err)
 	}
-	defer func() { _ = server.Shutdown() }()
+	defer func() { _ = srv.Shutdown() }()
 
 	log.Printf("mdns-server %s", version)
 	log.Printf("  hostname:  %s", hostFQDN)
 	log.Printf("  ips:       %v", ipList)
-	log.Printf("  service:   %s.%s.", service, domain)
+	log.Printf("  service:   %s.%s.", serviceName, domain)
 	log.Printf("  port:      %d", port)
 	if iface != "" {
 		log.Printf("  iface:     %s", iface)

@@ -1,4 +1,4 @@
-package mdns
+package service
 
 import (
 	"bytes"
@@ -9,59 +9,57 @@ import (
 	"github.com/miekg/dns"
 )
 
-func makeService(t *testing.T) *MDNSService {
+func makeService(t *testing.T) *Service {
 	return makeServiceWithServiceName(t, "_http._tcp")
 }
 
-func makeServiceWithServiceName(t *testing.T, service string) *MDNSService {
-	m, err := NewMDNSService(
-		"hostname", //unique instance
-		service,    //service name
-		"local.",   //domain
+func makeServiceWithServiceName(t *testing.T, name string) *Service {
+	m, err := New(
+		"hostname", // unique instance
+		name,       // service name
+		"local.",   // domain
 		"testhost.",
 		80, // port
 		[]net.IP{net.IP([]byte{192, 168, 0, 42}), net.ParseIP("2620:0:1000:1900:b0c2:d0b2:c411:18bc")},
 		[]string{"Local web server"}) // TXT
-
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-
 	return m
 }
 
-func TestNewMDNSService_BadParams(t *testing.T) {
+func TestNew_BadParams(t *testing.T) {
 	for _, test := range []struct {
 		testName string
 		hostName string
 		domain   string
 	}{
 		{
-			"NewMDNSService should fail when passed hostName that is not a legal fully-qualified domain name",
+			"New should fail when passed hostName that is not a legal fully-qualified domain name",
 			"hostname", // not legal FQDN - should be "hostname." or "hostname.local.", etc.
 			"local.",   // legal
 		},
 		{
-			"NewMDNSService should fail when passed domain that is not a legal fully-qualified domain name",
+			"New should fail when passed domain that is not a legal fully-qualified domain name",
 			"hostname.", // legal
 			"local",     // should be "local."
 		},
 	} {
-		_, err := NewMDNSService(
+		_, err := New(
 			"instance name",
 			"_http._tcp",
 			test.domain,
 			test.hostName,
-			80, // port
+			80,
 			[]net.IP{net.IP([]byte{192, 168, 0, 42})},
-			[]string{"Local web server"}) // TXT
+			[]string{"Local web server"})
 		if err == nil {
 			t.Fatalf("%s: error expected, but got none", test.testName)
 		}
 	}
 }
 
-func TestMDNSService_BadAddr(t *testing.T) {
+func TestService_BadAddr(t *testing.T) {
 	s := makeService(t)
 	q := dns.Question{
 		Name:  "random",
@@ -73,7 +71,7 @@ func TestMDNSService_BadAddr(t *testing.T) {
 	}
 }
 
-func TestMDNSService_ServiceAddr(t *testing.T) {
+func TestService_ServiceAddr(t *testing.T) {
 	s := makeService(t)
 	q := dns.Question{
 		Name:  "_http._tcp.local.",
@@ -109,7 +107,7 @@ func TestMDNSService_ServiceAddr(t *testing.T) {
 	}
 }
 
-func TestMDNSService_InstanceAddr_ANY(t *testing.T) {
+func TestService_InstanceAddr_ANY(t *testing.T) {
 	s := makeService(t)
 	q := dns.Question{
 		Name:  "hostname._http._tcp.local.",
@@ -133,7 +131,7 @@ func TestMDNSService_InstanceAddr_ANY(t *testing.T) {
 	}
 }
 
-func TestMDNSService_InstanceAddr_SRV(t *testing.T) {
+func TestService_InstanceAddr_SRV(t *testing.T) {
 	s := makeService(t)
 	q := dns.Question{
 		Name:  "hostname._http._tcp.local.",
@@ -159,7 +157,7 @@ func TestMDNSService_InstanceAddr_SRV(t *testing.T) {
 	}
 }
 
-func TestMDNSService_InstanceAddr_A(t *testing.T) {
+func TestService_InstanceAddr_A(t *testing.T) {
 	s := makeService(t)
 	q := dns.Question{
 		Name:  "hostname._http._tcp.local.",
@@ -178,7 +176,7 @@ func TestMDNSService_InstanceAddr_A(t *testing.T) {
 	}
 }
 
-func TestMDNSService_InstanceAddr_AAAA(t *testing.T) {
+func TestService_InstanceAddr_AAAA(t *testing.T) {
 	s := makeService(t)
 	q := dns.Question{
 		Name:  "hostname._http._tcp.local.",
@@ -201,7 +199,7 @@ func TestMDNSService_InstanceAddr_AAAA(t *testing.T) {
 	}
 }
 
-func TestMDNSService_InstanceAddr_TXT(t *testing.T) {
+func TestService_InstanceAddr_TXT(t *testing.T) {
 	s := makeService(t)
 	q := dns.Question{
 		Name:  "hostname._http._tcp.local.",
@@ -220,7 +218,7 @@ func TestMDNSService_InstanceAddr_TXT(t *testing.T) {
 	}
 }
 
-func TestMDNSService_HostNameQuery(t *testing.T) {
+func TestService_HostNameQuery(t *testing.T) {
 	s := makeService(t)
 	for _, test := range []struct {
 		q    dns.Question
@@ -257,7 +255,7 @@ func TestMDNSService_HostNameQuery(t *testing.T) {
 	}
 }
 
-func TestMDNSService_serviceEnum_PTR(t *testing.T) {
+func TestService_serviceEnum_PTR(t *testing.T) {
 	s := makeService(t)
 	q := dns.Question{
 		Name:  "_services._dns-sd._udp.local.",

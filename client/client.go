@@ -1,8 +1,9 @@
-package mdns
+package client
 
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"regexp"
 	"strings"
@@ -10,95 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"log"
-
 	"github.com/miekg/dns"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
 
-// ServiceEntry is returned after we query for a service
-type ServiceEntry struct {
-	Name       string
-	Host       string
-	AddrV4     net.IP
-	AddrV6     net.IP
-	Port       int
-	Info       string
-	InfoFields []string
-
-	Addr net.IP // @Deprecated
-
-	hasTXT bool
-	sent   bool
-}
-
-// complete is used to check if we have all the info we need
-func (s *ServiceEntry) complete() bool {
-	return (s.AddrV4 != nil || s.AddrV6 != nil || s.Addr != nil) && s.Port != 0 && s.hasTXT
-}
-
-// QueryParam is used to customize how a Lookup is performed
-type QueryParam struct {
-	Service             string               // Service to lookup
-	Domain              string               // Lookup domain, default "local"
-	Timeout             time.Duration        // Lookup timeout, default 1 second
-	Interface           *net.Interface       // Multicast interface to use
-	Entries             chan<- *ServiceEntry // Entries Channel
-	WantUnicastResponse bool                 // Unicast response desired, as per 5.4 in RFC
-}
-
-// DefaultParams is used to return a default set of QueryParam's
-func DefaultParams(service string) *QueryParam {
-	return &QueryParam{
-		Service:             service,
-		Domain:              "local",
-		Timeout:             time.Second,
-		Entries:             make(chan *ServiceEntry),
-		WantUnicastResponse: false, // TODO(reddaly): Change this default.
-	}
-}
-
-// Query looks up a given service, in a domain, waiting at most
-// for a timeout before finishing the query. The results are streamed
-// to a channel. Sends will not block, so clients should make sure to
-// either read or buffer.
-func Query(params *QueryParam) error {
-	// Create a new client
-	client, err := newClient()
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-
-	// Set the multicast interface
-	if params.Interface != nil {
-		//		log.InfofS("params.Interface.Name %#v", params.Interface)
-		if err := client.setInterface(params.Interface); err != nil {
-			return err
-		}
-	}
-	// Ensure defaults are set
-	if params.Domain == "" {
-		params.Domain = "local"
-	}
-	if params.Timeout == 0 {
-		params.Timeout = time.Second
-	}
-
-	// Run the query
-	return client.query(params)
-}
-
-// Lookup is the same as Query, however it uses all the default parameters
-func Lookup(service string, entries chan<- *ServiceEntry) error {
-	params := DefaultParams(service)
-	params.Entries = entries
-	return Query(params)
-}
-
-// Client provides a query interface that can be used to
-// search for service providers using mDNS
+// client is the internal UDP plumbing. Callers use Query / Lookup.
 type client struct {
 	ipv4UnicastConn *net.UDPConn
 	ipv6UnicastConn *net.UDPConn
@@ -106,22 +24,39 @@ type client struct {
 	ipv4MulticastConn *net.UDPConn
 	ipv6MulticastConn *net.UDPConn
 
+	ipv4Addr *net.UDPAddr
+	ipv6Addr *net.UDPAddr
+
 	closed   int32
 	closedCh chan struct{} // TODO(reddaly): This doesn't appear to be used.
 }
 
-// NewClient creates a new mdns Client that can be used to query
-// for records
-func newClient() (*client, error) {
-	var err error
+// newClient creates an mDNS client bound to ephemeral ports, joining
+// the multicast groups derived from params.
+func newClient(params *QueryParam) (*client, error) {
 	// TODO(reddaly): At least attempt to bind to the port required in the spec.
-	// Create a IPv4 listener
+	port := params.Port
+	if port == 0 {
+		port = DefaultPort
+	}
+	v4ip := params.MulticastIPv4
+	if len(v4ip) == 0 {
+		v4ip = DefaultIPv4Group
+	}
+	v6ip := params.MulticastIPv6
+	if len(v6ip) == 0 {
+		v6ip = DefaultIPv6Group
+	}
+	ipv4Addr := &net.UDPAddr{IP: v4ip, Port: port}
+	ipv6Addr := &net.UDPAddr{IP: v6ip, Port: port}
+
+	var err error
 	uconn4, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
 		log.Printf("[ERR] mdns: Failed to bind to udp4 port: %v", err)
 	}
 	var mconn6, uconn6 *net.UDPConn
-	if useIpv6 {
+	if params.UseIPv6 {
 		if uconn6, err = net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6zero, Port: 0}); err != nil {
 			log.Printf("[ERR] mdns: Failed to bind to udp6 port: %v", err)
 		}
@@ -147,47 +82,45 @@ func newClient() (*client, error) {
 		return nil, fmt.Errorf("failed to bind to any multicast udp port")
 	}
 
-	c := &client{
+	return &client{
 		ipv4MulticastConn: mconn4,
 		ipv6MulticastConn: mconn6,
 		ipv4UnicastConn:   uconn4,
 		ipv6UnicastConn:   uconn6,
+		ipv4Addr:          ipv4Addr,
+		ipv6Addr:          ipv6Addr,
 		closedCh:          make(chan struct{}),
-	}
-	return c, nil
+	}, nil
 }
 
-// Close is used to cleanup the client
+// Close releases any sockets held by the client.
 func (c *client) Close() error {
 	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
-		// something else already closed it
 		return nil
 	}
 
-	//	log.Printf("[INFO] mdns: Closing client %v", *c)
 	close(c.closedCh)
 
 	if c.ipv4UnicastConn != nil {
-		c.ipv4UnicastConn.Close()
+		_ = c.ipv4UnicastConn.Close()
 	}
 	if c.ipv6UnicastConn != nil {
-		c.ipv6UnicastConn.Close()
+		_ = c.ipv6UnicastConn.Close()
 	}
 	if c.ipv4MulticastConn != nil {
-		c.ipv4MulticastConn.Close()
+		_ = c.ipv4MulticastConn.Close()
 	}
 	if c.ipv6MulticastConn != nil {
-		c.ipv6MulticastConn.Close()
+		_ = c.ipv6MulticastConn.Close()
 	}
 
 	return nil
 }
 
-// setInterface is used to set the query interface, uses system
-// default if not provided
+// setInterface pins all open connections to iface.
 func (c *client) setInterface(iface *net.Interface) error {
 	if c.ipv4MulticastConn == nil && c.ipv6MulticastConn == nil {
-		return fmt.Errorf("can not set any interrface  iptype [ip4, ip6]")
+		return fmt.Errorf("can not set any interface  iptype [ip4, ip6]")
 	}
 
 	if c.ipv4UnicastConn != nil {
@@ -235,20 +168,19 @@ func regexpMatch(parterm, strcompare string) bool {
 	return rx.MatchString(strcompare)
 }
 
-// query is used to perform a lookup and stream results
+// query performs the actual lookup and streams results to params.Entries.
 func (c *client) query(params *QueryParam) error {
 	// Create the service name
 	rexpprefix := "~"
-	serviceAddr := fmt.Sprintf("%s.%s.", trimDot(params.Service), trimDot(params.Domain))
+	serviceAddr := fmt.Sprintf("%s.%s.", strings.Trim(params.Service, "."), strings.Trim(params.Domain, "."))
 	if strings.HasPrefix(serviceAddr, rexpprefix) {
 		_, repartem, ok := strings.Cut(serviceAddr, rexpprefix)
 		if ok {
 			rexpprefix = ""
 			serviceAddr = repartem
 		}
-		// fmt.Println(serviceAddr)
 	}
-	sdServiceAddr := fmt.Sprintf("_services._dns-sd._udp.%s.", trimDot(params.Domain))
+	sdServiceAddr := fmt.Sprintf("_services._dns-sd._udp.%s.", strings.Trim(params.Domain, "."))
 
 	// Start listening for response packets
 	msgCh := make(chan *dns.Msg, 32)
@@ -265,10 +197,9 @@ func (c *client) query(params *QueryParam) error {
 	startRecv(c.ipv4MulticastConn)
 	startRecv(c.ipv6MulticastConn)
 
-	// Ensure recv goroutines are fully stopped and msgCh is closed on return
+	// Ensure recv goroutines are fully stopped and msgCh is closed on return.
 	defer func() {
-		// Close client to unblock recv goroutines waiting on Read()
-		c.Close()
+		_ = c.Close()
 		recvWg.Wait()
 		close(msgCh)
 	}()
@@ -298,7 +229,6 @@ func (c *client) query(params *QueryParam) error {
 	// Map the in-progress responses
 	inprogress := make(map[string]*ServiceEntry)
 
-	// Listen until we reach the timeout
 	finishTimer := time.NewTimer(params.Timeout)
 	startTime := time.Now()
 	for {
@@ -307,19 +237,15 @@ func (c *client) query(params *QueryParam) error {
 			var inp *ServiceEntry
 			for _, answer := range append(resp.Answer, resp.Extra...) {
 				// TODO(reddaly): Check that response corresponds to serviceAddr?
-				// fmt.Println("\nanswer -> ", answer)
 				switch rr := answer.(type) {
 				case *dns.PTR:
-					// Create new entry for this
 					inp = ensureName(inprogress, rr.Ptr)
 
 				case *dns.SRV:
-					// Check for a target mismatch
 					if rr.Target != rr.Hdr.Name {
 						alias(inprogress, rr.Hdr.Name, rr.Target)
 					}
 
-					// Get the port
 					inp = ensureName(inprogress, rr.Hdr.Name)
 
 					if !strings.HasSuffix(inp.Name, serviceAddr) && sdServiceAddr != serviceAddr && !regexpMatch(serviceAddr, inp.Name) {
@@ -329,7 +255,6 @@ func (c *client) query(params *QueryParam) error {
 					inp.Port = int(rr.Port)
 
 				case *dns.TXT:
-					// Pull out the txt
 					inp = ensureName(inprogress, rr.Hdr.Name)
 					if !strings.HasSuffix(inp.Name, serviceAddr) && sdServiceAddr != serviceAddr && !regexpMatch(serviceAddr, inp.Name) {
 						break
@@ -339,21 +264,19 @@ func (c *client) query(params *QueryParam) error {
 					inp.hasTXT = true
 
 				case *dns.A:
-					// Pull out the IP
 					inp = ensureName(inprogress, rr.Hdr.Name)
 					if !strings.HasSuffix(inp.Name, serviceAddr) && sdServiceAddr != serviceAddr && !regexpMatch(serviceAddr, inp.Name) {
 						break
 					}
-					inp.Addr = rr.A // @Deprecated
+					inp.Addr = rr.A
 					inp.AddrV4 = rr.A
 
 				case *dns.AAAA:
-					// Pull out the IP
 					inp = ensureName(inprogress, rr.Hdr.Name)
 					if !strings.HasSuffix(rr.Hdr.Name, serviceAddr) && sdServiceAddr != serviceAddr && !regexpMatch(serviceAddr, rr.Hdr.Name) {
 						break
 					}
-					inp.Addr = rr.AAAA // @Deprecated
+					inp.Addr = rr.AAAA
 					inp.AddrV6 = rr.AAAA
 				}
 			}
@@ -368,7 +291,7 @@ func (c *client) query(params *QueryParam) error {
 					continue
 				}
 				inp.sent = true
-				if startTime.Add(params.Timeout * 4).After(time.Now()) { //reset if read ok
+				if startTime.Add(params.Timeout * 4).After(time.Now()) {
 					finishTimer.Reset(params.Timeout)
 				}
 				select {
@@ -391,7 +314,7 @@ func (c *client) query(params *QueryParam) error {
 	}
 }
 
-// sendQuery is used to multicast a query out
+// sendQuery is used to multicast a query out.
 func (c *client) sendQuery(q *dns.Msg) error {
 	errs := ""
 
@@ -402,21 +325,19 @@ func (c *client) sendQuery(q *dns.Msg) error {
 		return err
 	}
 	if c.ipv4UnicastConn != nil {
-		cntsend += 1
-		_, err = c.ipv4UnicastConn.WriteToUDP(buf, ipv4Addr)
+		cntsend++
+		_, err = c.ipv4UnicastConn.WriteToUDP(buf, c.ipv4Addr)
 		if err != nil {
 			errs = errs + "\n" + err.Error()
-			cnterr += 1
-			//			return err
+			cnterr++
 		}
 	}
 	if c.ipv6UnicastConn != nil {
-		cntsend += 1
-		_, err = c.ipv6UnicastConn.WriteToUDP(buf, ipv6Addr)
+		cntsend++
+		_, err = c.ipv6UnicastConn.WriteToUDP(buf, c.ipv6Addr)
 		if err != nil {
 			errs = errs + "\n" + err.Error()
-			cnterr += 1
-			//			return err
+			cnterr++
 		}
 	}
 	// Return error only if ALL sends failed
@@ -426,7 +347,7 @@ func (c *client) sendQuery(q *dns.Msg) error {
 	return nil
 }
 
-// recv is used to receive until we get a shutdown
+// recv is used to receive until we get a shutdown.
 func (c *client) recv(l *net.UDPConn, msgCh chan *dns.Msg) {
 	if l == nil {
 		return
@@ -454,22 +375,4 @@ func (c *client) recv(l *net.UDPConn, msgCh chan *dns.Msg) {
 			return
 		}
 	}
-}
-
-// ensureName is used to ensure the named node is in progress
-func ensureName(inprogress map[string]*ServiceEntry, name string) *ServiceEntry {
-	if inp, ok := inprogress[name]; ok {
-		return inp
-	}
-	inp := &ServiceEntry{
-		Name: name,
-	}
-	inprogress[name] = inp
-	return inp
-}
-
-// alias is used to setup an alias between two entries
-func alias(inprogress map[string]*ServiceEntry, src, dst string) {
-	srcEntry := ensureName(inprogress, src)
-	inprogress[dst] = srcEntry
 }

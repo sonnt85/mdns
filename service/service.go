@@ -1,4 +1,4 @@
-package mdns
+package service
 
 import (
 	"fmt"
@@ -9,36 +9,23 @@ import (
 	"github.com/miekg/dns"
 )
 
-const (
-	// defaultTTL is the default TTL value in returned DNS records in seconds.
-	defaultTTL = 120
-)
-
-// Zone is the interface used to integrate with the server and
-// to serve records dynamically
-type Zone interface {
-	// Records returns DNS records in response to a DNS question.
-	Records(q dns.Question) []dns.RR
-}
-
-// MDNSService is used to export a named service by implementing a Zone
-type MDNSService struct {
-	Instance string // Instance name (e.g. "hostService name")
-	Service  string // Service name (e.g. "_http._tcp.")
-	Domain   string // If blank, assumes "local"
-	HostName string // Host machine DNS name (e.g. "mymachine.net.")
-	Port     *int   // Service Port
-	//	IPs      []net.IP    // IP addresses for the service's host
-	IPs interface{} // IP addresses for the service's host
-	TXT interface{} // Service TXT records
+// Service is used to export a named service by implementing a Zone.
+type Service struct {
+	Instance string      // Instance name (e.g. "hostService name")
+	Service  string      // Service name (e.g. "_http._tcp.")
+	Domain   string      // If blank, assumes "local"
+	HostName string      // Host machine DNS name (e.g. "mymachine.net.")
+	Port     *int        // Service Port
+	IPs      interface{} // IP addresses for the service's host
+	TXT      interface{} // Service TXT records
 
 	serviceAddr  string // Fully qualified service address
 	instanceAddr string // Fully qualified instance address
 	enumAddr     string // _services._dns-sd._udp.<domain>
 }
 
-// validateFQDN returns an error if the passed string is not a fully qualified
-// hdomain name (more specifically, a hostname).
+// validateFQDN returns an error if the passed string is not a fully
+// qualified domain name (more specifically, a hostname).
 func validateFQDN(s string) error {
 	if len(s) == 0 {
 		return fmt.Errorf("FQDN must not be blank")
@@ -51,26 +38,25 @@ func validateFQDN(s string) error {
 	return nil
 }
 
-// NewMDNSService returns a new instance of MDNSService.
+// New returns a new Service.
 //
-// If domain, hostName, or ips is set to the zero value, then a default value
-// will be inferred from the operating system.
+// If domain, hostName, or ips is set to the zero value, then a default
+// value will be inferred from the operating system.
 //
-// TODO(reddaly): This interface may need to change to account for "unique
-// record" conflict rules of the mDNS protocol.  Upon startup, the server should
-// check to ensure that the instance name does not conflict with other instance
-// names, and, if required, select a new name.  There may also be conflicting
-// hostName A/AAAA records.
-// ipsI: net.IP,  *net.IP, []net.IP, *[]net.IP, string, *string, []string, *[]string => *[]net.IP
-// portI: int, *int => *int
-// txtI: string, []string, *[]string => *[]string
-// txtI: string, []string, *[]string => *[]string
-// domain: empty -> .local,
-// hostName empty -> os.Hostname
-func NewMDNSService(instance, service, domain, hostName string, portI interface{}, ipsI interface{}, txtI interface{}) (*MDNSService, error) {
-	// Sanity check inputs
+// TODO(reddaly): This interface may need to change to account for
+// "unique record" conflict rules of the mDNS protocol. Upon startup,
+// the server should check to ensure that the instance name does not
+// conflict with other instance names, and, if required, select a new
+// name. There may also be conflicting hostName A/AAAA records.
+//
+// ipsI accepts net.IP, *net.IP, []net.IP, *[]net.IP, string, *string,
+// []string, *[]string.
+// portI accepts int, *int.
+// txtI accepts string, []string, *[]string.
+// domain empty -> "local.".
+// hostName empty -> os.Hostname() + ".".
+func New(instance, service, domain, hostName string, portI interface{}, ipsI interface{}, txtI interface{}) (*Service, error) {
 	var port *int
-	//	var ips = new([]net.IP)
 	var txt = new([]string)
 
 	if instance == "" {
@@ -92,7 +78,6 @@ func NewMDNSService(instance, service, domain, hostName string, portI interface{
 		return nil, fmt.Errorf("missing service port")
 	}
 
-	// Set default domain
 	if domain == "" {
 		domain = "local."
 	}
@@ -100,7 +85,6 @@ func NewMDNSService(instance, service, domain, hostName string, portI interface{
 		return nil, fmt.Errorf("domain %q is not a fully-qualified domain name: %v", domain, err)
 	}
 
-	// Get host information if no host is specified.
 	if hostName == "" {
 		var err error
 		hostName, err = os.Hostname()
@@ -122,7 +106,7 @@ func NewMDNSService(instance, service, domain, hostName string, portI interface{
 		txt = v
 	default:
 	}
-	return &MDNSService{
+	return &Service{
 		Instance:     instance,
 		Service:      service,
 		Domain:       domain,
@@ -136,12 +120,12 @@ func NewMDNSService(instance, service, domain, hostName string, portI interface{
 	}, nil
 }
 
-// trimDot is used to trim the dots from the start or end of a string
+// trimDot trims dots from the start or end of a string.
 func trimDot(s string) string {
 	return strings.Trim(s, ".")
 }
 
-// serviceRecords is called when the query matches the service name
+// i2netIP coerces a permissive ips interface{} into []net.IP.
 func i2netIP(i interface{}) (ips []net.IP) {
 	switch v := i.(type) {
 	case net.IP:
@@ -177,12 +161,12 @@ func i2netIP(i interface{}) (ips []net.IP) {
 	return ips
 }
 
-func (m *MDNSService) getIPs() (ips []net.IP) {
+func (m *Service) getIPs() (ips []net.IP) {
 	ips = i2netIP(m.IPs)
 	return ips
 }
 
-func (m *MDNSService) gettxt() (txt []string) {
+func (m *Service) gettxt() (txt []string) {
 	switch v := m.TXT.(type) {
 	case *[]string:
 		if v != nil {
@@ -204,7 +188,7 @@ func (m *MDNSService) gettxt() (txt []string) {
 }
 
 // Records returns DNS records in response to a DNS question.
-func (m *MDNSService) Records(q dns.Question) []dns.RR {
+func (m *Service) Records(q dns.Question) []dns.RR {
 	switch q.Name {
 	case m.enumAddr:
 		return m.serviceEnum(q)
@@ -222,7 +206,7 @@ func (m *MDNSService) Records(q dns.Question) []dns.RR {
 	}
 }
 
-func (m *MDNSService) serviceEnum(q dns.Question) []dns.RR {
+func (m *Service) serviceEnum(q dns.Question) []dns.RR {
 	switch q.Qtype {
 	case dns.TypeANY:
 		fallthrough
@@ -242,8 +226,8 @@ func (m *MDNSService) serviceEnum(q dns.Question) []dns.RR {
 	}
 }
 
-// serviceRecords is called when the query matches the service name
-func (m *MDNSService) serviceRecords(q dns.Question) []dns.RR {
+// serviceRecords is called when the query matches the service name.
+func (m *Service) serviceRecords(q dns.Question) []dns.RR {
 	switch q.Qtype {
 	case dns.TypeANY:
 		fallthrough
@@ -260,30 +244,26 @@ func (m *MDNSService) serviceRecords(q dns.Question) []dns.RR {
 		}
 		servRec := []dns.RR{rr}
 
-		// Get the instance records
 		instRecs := m.instanceRecords(dns.Question{
 			Name:  m.instanceAddr,
 			Qtype: dns.TypeANY,
 		})
 
-		// Return the service record with the instance records
 		return append(servRec, instRecs...)
 	default:
 		return nil
 	}
 }
 
-// serviceRecords is called when the query matches the instance name
-func (m *MDNSService) instanceRecords(q dns.Question) []dns.RR {
+// instanceRecords is called when the query matches the instance name.
+func (m *Service) instanceRecords(q dns.Question) []dns.RR {
 	switch q.Qtype {
 	case dns.TypeANY:
-		// Get the SRV, which includes A and AAAA
 		recs := m.instanceRecords(dns.Question{
 			Name:  m.instanceAddr,
 			Qtype: dns.TypeSRV,
 		})
 
-		// Add the TXT record
 		recs = append(recs, m.instanceRecords(dns.Question{
 			Name:  m.instanceAddr,
 			Qtype: dns.TypeTXT,
@@ -311,10 +291,10 @@ func (m *MDNSService) instanceRecords(q dns.Question) []dns.RR {
 		var rr []dns.RR
 		for _, ip := range m.getIPs() {
 			if ip.To4() != nil {
-				// TODO(reddaly): IPv4 addresses could be encoded in IPv6 format and
-				// putinto AAAA records, but the current logic puts ipv4-encodable
-				// addresses into the A records exclusively.  Perhaps this should be
-				// configurable?
+				// TODO(reddaly): IPv4 addresses could be encoded in IPv6
+				// format and put into AAAA records, but the current logic
+				// puts ipv4-encodable addresses into the A records
+				// exclusively. Perhaps this should be configurable?
 				continue
 			}
 
@@ -333,7 +313,6 @@ func (m *MDNSService) instanceRecords(q dns.Question) []dns.RR {
 		return rr
 
 	case dns.TypeSRV:
-		// Create the SRV Record
 		srv := &dns.SRV{
 			Hdr: dns.RR_Header{
 				Name:   q.Name,
@@ -348,13 +327,11 @@ func (m *MDNSService) instanceRecords(q dns.Question) []dns.RR {
 		}
 		recs := []dns.RR{srv}
 
-		// Add the A record
 		recs = append(recs, m.instanceRecords(dns.Question{
 			Name:  m.instanceAddr,
 			Qtype: dns.TypeA,
 		})...)
 
-		// Add the AAAA record
 		recs = append(recs, m.instanceRecords(dns.Question{
 			Name:  m.instanceAddr,
 			Qtype: dns.TypeAAAA,

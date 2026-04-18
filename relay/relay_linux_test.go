@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/sonnt85/mdns"
+	"github.com/sonnt85/mdns/client"
 )
 
 // needs: root, `ip` command
@@ -37,7 +37,7 @@ func TestIntegrationRelayReflectsBetweenVeth(t *testing.T) {
 	// describe the shape; the engineer should implement using their
 	// preferred netns library.
 	t.Skip("TODO: implement veth/netns scaffold — requires a netns helper")
-	_ = mdns.Lookup
+	_ = client.Lookup
 	_ = dns.Fqdn
 	_ = context.Background
 	_ = time.Second

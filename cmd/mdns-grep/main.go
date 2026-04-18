@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sonnt85/mdns"
+	"github.com/sonnt85/mdns/client"
 )
 
 // Set via -ldflags at build time
@@ -94,12 +94,6 @@ func main() {
 		return
 	}
 
-	if *ipv6 {
-		mdns.ConfigUseIpv6(true)
-	}
-	if *port > 0 {
-		mdns.InitPort(*port)
-	}
 
 	if *scanMode {
 		runFullScan()
@@ -128,7 +122,7 @@ func runFullScan() {
 	}
 
 	// Phase 1: get all service types
-	typeEntries := make(chan *mdns.ServiceEntry, 64)
+	typeEntries := make(chan *client.ServiceEntry, 64)
 	serviceTypes := make(map[string]bool)
 	var mu sync.Mutex
 
@@ -142,15 +136,17 @@ func runFullScan() {
 		}
 	}()
 
-	params := &mdns.QueryParam{
+	params := &client.QueryParam{
 		Service:             "_services._dns-sd._udp",
 		Domain:              *domain,
 		Timeout:             *timeout,
 		Interface:           getIface(),
 		Entries:             typeEntries,
 		WantUnicastResponse: *unicast,
+		UseIPv6:             *ipv6,
+		Port:                *port,
 	}
-	_ = mdns.Query(params)
+	_ = client.Query(params)
 	close(typeEntries)
 
 	// Even if no complete entries, the library's inprogress map caught PTR names.
@@ -160,7 +156,7 @@ func runFullScan() {
 	// Workaround: also add common well-known service types if none found
 	if len(serviceTypes) == 0 {
 		// Try regex mode to catch any service
-		regexEntries := make(chan *mdns.ServiceEntry, 64)
+		regexEntries := make(chan *client.ServiceEntry, 64)
 		go func() {
 			for e := range regexEntries {
 				// Extract service type from instance name: "host._http._tcp.local." → "_http._tcp"
@@ -171,15 +167,17 @@ func runFullScan() {
 				}
 			}
 		}()
-		regexParams := &mdns.QueryParam{
+		regexParams := &client.QueryParam{
 			Service:             "~.*",
 			Domain:              *domain,
 			Timeout:             *timeout,
 			Interface:           getIface(),
 			Entries:             regexEntries,
 			WantUnicastResponse: *unicast,
+			UseIPv6:             *ipv6,
+			Port:                *port,
 		}
-		_ = mdns.Query(regexParams)
+		_ = client.Query(regexParams)
 		close(regexEntries)
 	}
 
@@ -250,7 +248,7 @@ func getIface() *net.Interface {
 }
 
 func queryService(service string) []result {
-	entries := make(chan *mdns.ServiceEntry, 64)
+	entries := make(chan *client.ServiceEntry, 64)
 	var results []result
 	var mu sync.Mutex
 
@@ -268,22 +266,24 @@ func queryService(service string) []result {
 		close(done)
 	}()
 
-	params := &mdns.QueryParam{
+	params := &client.QueryParam{
 		Service:             service,
 		Domain:              *domain,
 		Timeout:             *timeout,
 		Interface:           getIface(),
 		Entries:             entries,
 		WantUnicastResponse: *unicast,
+		UseIPv6:             *ipv6,
+		Port:                *port,
 	}
-	_ = mdns.Query(params)
+	_ = client.Query(params)
 	close(entries)
 	<-done
 
 	return results
 }
 
-func entryToResult(e *mdns.ServiceEntry) result {
+func entryToResult(e *client.ServiceEntry) result {
 	r := result{
 		Name: e.Name,
 		Host: e.Host,
@@ -303,7 +303,7 @@ func outputResults(results []result) {
 	if *jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(results)
+		_ = enc.Encode(results)
 		return
 	}
 
