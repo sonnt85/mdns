@@ -49,6 +49,19 @@ Notably, multicast cannot be used in any sort of cloud, or shared infrastructure
 environment. However it works well in most office, home, or private infrastructure
 environments.
 
+### mdns-relay — cross-network mDNS reflector
+
+A second CLI, `mdns-relay`, reflects mDNS packets between interfaces —
+useful for LAN ↔ Docker container service discovery without `--network=host`.
+See [`relay/README.md`](relay/README.md).
+
+```bash
+go install github.com/sonnt85/mdns/cmd/mdns-relay@latest
+sudo mdns-relay -i eth0,docker0,br-*
+```
+
+---
+
 ## Installation
 
 ```bash
