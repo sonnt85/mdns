@@ -35,6 +35,10 @@ type Config struct {
 	// Logger is a printf-style log function. Nil uses log.Default().Printf.
 	Logger func(format string, args ...any)
 
+	// Verbose enables a per-forward log line in addition to the default
+	// milestone logging (open, stopped, write errors).
+	Verbose bool
+
 	// Watcher plugs a custom InterfaceWatcher (e.g. netlink).
 	// Nil uses the built-in polling watcher.
 	Watcher InterfaceWatcher

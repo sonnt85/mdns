@@ -206,6 +206,9 @@ func (r *Relay) handleFamily(srcL *ifaceListener, pkt []byte, from *net.UDPAddr,
 			continue
 		}
 		r.stats.forwarded.Add(1)
+		if r.cfg.Verbose {
+			r.cfg.Logger("relay: fwd %s->%s %d bytes (v6=%v)", srcL.iface.Name, l.iface.Name, len(pkt), isV6)
+		}
 	}
 }
 

@@ -28,7 +28,7 @@ type client struct {
 	ipv6Addr *net.UDPAddr
 
 	closed   int32
-	closedCh chan struct{} // TODO(reddaly): This doesn't appear to be used.
+	closedCh chan struct{}
 }
 
 // newClient creates an mDNS client bound to ephemeral ports, joining

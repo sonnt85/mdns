@@ -81,6 +81,7 @@ func main() {
 		WatchInterval: watch,
 		DedupWindow:   dedup,
 		Logger:        logger,
+		Verbose:       verbose,
 	}
 
 	r, err := relay.New(cfg)
@@ -96,8 +97,6 @@ func main() {
 		go statsTicker(ctx, r, statsEvery, logger)
 	}
 	go usr1Stats(r, logger)
-
-	_ = verbose // TODO wire through when listener logs are added
 
 	if err := r.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(os.Stderr, "relay error: %v\n", err)
