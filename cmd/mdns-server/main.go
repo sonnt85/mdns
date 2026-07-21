@@ -32,14 +32,14 @@ func (s *stringsFlag) Set(v string) error {
 
 func main() {
 	var (
-		host    string
-		ips     string
+		host        string
+		ips         string
 		serviceName string
-		domain  string
-		port    int
-		txt     stringsFlag
-		iface   string
-		showVer bool
+		domain      string
+		port        int
+		txt         stringsFlag
+		iface       string
+		showVer     bool
 	)
 
 	defHost, _ := os.Hostname()

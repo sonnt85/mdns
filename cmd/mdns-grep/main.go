@@ -46,16 +46,16 @@ type result struct {
 }
 
 var (
-	timeout   *time.Duration
-	domain    *string
-	iface     *string
-	useRegex  *bool
-	jsonOut   *bool
-	ipv6      *bool
-	port      *int
-	unicast   *bool
-	scanMode   *bool
-	showVer    *bool
+	timeout  *time.Duration
+	domain   *string
+	iface    *string
+	useRegex *bool
+	jsonOut  *bool
+	ipv6     *bool
+	port     *int
+	unicast  *bool
+	scanMode *bool
+	showVer  *bool
 )
 
 func main() {
@@ -93,7 +93,6 @@ func main() {
 		fmt.Printf("Source: https://github.com/sonnt85/mdns\n")
 		return
 	}
-
 
 	if *scanMode {
 		runFullScan()
