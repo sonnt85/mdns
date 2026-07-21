@@ -1,4 +1,4 @@
-//go:build integration
+//go1:build integration
 
 package client
 
